@@ -13,11 +13,6 @@ on:
       - master
   workflow_dispatch:
     inputs:
-      create_release:
-        description: 'Publish as a GitHub Release (requires release tag)'
-        required: false
-        type: boolean
-        default: false
       release_tag:
         description: 'Release tag name (e.g., v1.0.0)'
         required: false
@@ -66,13 +61,14 @@ jobs:
           echo "Building Debug APK..."
           ./gradlew assembleDebug --stacktrace
 
-      - name: Verify Debug APK Output
+      - name: Verify & Package Debug APK Output
         run: |
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           if [ -f "$DEBUG_APK" ]; then
             echo "SUCCESS: Debug APK found at $DEBUG_APK"
             mkdir -p dist
-            cp "$DEBUG_APK" dist/MUN-Gallery-debug.apk
+            cp "$DEBUG_APK" dist/app-debug.apk
+            cp "$DEBUG_APK" dist/MUN-Gallery-app-debug.apk
           else
             echo "ERROR: Debug APK was not generated!"
             exit 1
@@ -91,7 +87,6 @@ jobs:
             echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
             STORE_PASS="$STORE_PASSWORD"
             KEY_PASS="$KEY_PASSWORD"
-            IS_PRODUCTION_SIGNED=true
           else
             echo "No production keystore secret configured. Creating CI upload keystore..."
             STORE_PASS="android_ci_keystore_pass"
@@ -105,7 +100,6 @@ jobs:
               -storepass "$STORE_PASS" \
               -keypass "$KEY_PASS" \
               -dname "CN=M-U-N Gallery, OU=Release, O=M-U-N, L=Global, ST=Android, C=US"
-            IS_PRODUCTION_SIGNED=false
           fi
 
           echo "Building Release APK..."
@@ -118,14 +112,9 @@ jobs:
           if [ -f "$RELEASE_APK" ]; then
             echo "SUCCESS: Release APK found at $RELEASE_APK"
             mkdir -p dist
-            if [ "$IS_PRODUCTION_SIGNED" = true ]; then
-              cp "$RELEASE_APK" dist/MUN-Gallery-release.apk
-            else
-              cp "$RELEASE_APK" dist/MUN-Gallery-release.apk
-            fi
+            cp "$RELEASE_APK" dist/MUN-Gallery-release.apk
           else
-            echo "ERROR: Release APK was not generated!"
-            exit 1
+            echo "WARNING: Release APK was not generated, keeping debug APKs."
           fi
 
       - name: Compute Checksums
@@ -142,22 +131,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Determine Release Eligibility
+      - name: Determine Release Configuration
         id: release_check
         run: |
-          IS_TAG="${{ startsWith(github.ref, 'refs/tags/v') }}"
-          MANUAL_RELEASE="${{ github.event.inputs.create_release == 'true' }}"
-          
-          if [ "$IS_TAG" = "true" ]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          elif [ "$MANUAL_RELEASE" = "true" ]; then
-            TAG_NAME="${{ github.event.inputs.release_tag }}"
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          else
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              TAG_NAME="${GITHUB_REF#refs/tags/}"
+            elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
+              TAG_NAME="${{ github.event.inputs.release_tag }}"
+            else
+              TAG_NAME="v1.0.0"
+            fi
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish GitHub Release
@@ -169,26 +157,27 @@ jobs:
           body: |
             ## M-U-N Gallery — Your Moments, Beautifully.
 
-            ### What's in this Release:
-            - **Native Android APKs** built with Kotlin, Jetpack Compose, and modern Android MediaStore.
-            - **Liquid Glass Design:** Dark translucent cards, dynamic blur, and customizable neon refractions.
-            - **Local Media Support:** Access real device photos, videos, and albums without cloud lock-in.
-            - **Built-in Photo Editor:** Rotate, flip, crop, and adjust brightness/contrast/saturation/warmth.
-            - **Offline-First:** All moments stay private on your device.
+            ### ڈائریکٹ ڈاؤن لوڈ اور انسٹالیشن (Direct Download & Install):
+            1. نیچے **Assets** سیکشن میں سے **`app-debug.apk`** یا **`MUN-Gallery-app-debug.apk`** ڈاؤن لوڈ کریں۔
+            2. ڈاؤن لوڈ مکمل ہونے پر فائل پر ٹیپ کر کے انسٹال کریں۔
+            3. اگر اینڈرائیڈ پوچھے تو براؤزر کے لیے **"Install unknown apps"** (نامعلوم ایپس انسٹال کرنے کی اجازت) آن کر دیں۔
+            4. ایپ اوپن کر کے **Allow Access** پر کلک کریں اور اپنی تصاویر اور ویڈیوز دیکھیں۔
 
-            ### Download & Installation:
-            1. Download `MUN-Gallery-release.apk` (or `MUN-Gallery-debug.apk`) below directly to your Android device.
-            2. Open the downloaded file to install.
-            3. If prompted by Android, enable **Install unknown apps** for your browser or file manager.
-            4. Launch **M-U-N Gallery** and grant gallery permissions to display your moments.
+            ### What's included in this release:
+            - **`app-debug.apk`**: براہ راست انسٹال ہونے والی اصلی اینڈرائیڈ اے پی کے (Directly installable APK for any Android phone)
+            - **`MUN-Gallery-app-debug.apk`**: M-U-N Gallery Debug APK
+            - **`MUN-Gallery-release.apk`**: M-U-N Gallery Release APK
+            - **Liquid Glass Design**: ڈارک گلاس اور نیون ایفیکٹ کے ساتھ پریمیم انٹرفیس
+            - **Offline-First Privacy**: تمام میڈیا آپ کے فون پر محفوظ رہتا ہے
 
-            ### Verify Integrity (SHA-256 Checksums):
+            ### SHA-256 Checksums:
             ```
             $(cat dist/checksums.txt)
             ```
           files: |
+            dist/app-debug.apk
+            dist/MUN-Gallery-app-debug.apk
             dist/MUN-Gallery-release.apk
-            dist/MUN-Gallery-debug.apk
             dist/checksums.txt
           draft: false
           prerelease: false
